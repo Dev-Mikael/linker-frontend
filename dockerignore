@@ -1,0 +1,43 @@
+# =============================================================================
+# .dockerignore — Frontend
+# =============================================================================
+
+.git
+.gitignore
+.gitattributes
+
+node_modules/
+.npm/
+
+.next/
+out/
+
+# ⚠️  SECURITY: Never bake .env files into Docker images
+.env
+.env.*
+!.env.example
+
+.vscode/
+.idea/
+*.log
+
+.DS_Store
+Thumbs.db
+
+.github/
+
+README.md
+CHANGELOG.md
+*.md
+!next.config.mjs
+
+Dockerfile*
+docker-compose*
+.dockerignore
+
+**/*.test.ts
+**/*.spec.ts
+coverage/
+__tests__/
+.storybook/
+storybook-static/
