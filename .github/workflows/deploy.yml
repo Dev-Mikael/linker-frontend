@@ -244,6 +244,7 @@ jobs:
                   \"Port\": \"3000\",
                   \"RuntimeEnvironmentVariables\": {
                     \"PORT\": \"3000\",
+                    \"HOSTNAME\": \"0.0.0.0\",
                     \"NODE_ENV\": \"production\",
                     \"NEXTAUTH_URL\": \"https://${{ env.FRONTEND_DOMAIN }}\",
                     \"NEXT_PUBLIC_API_URL\": \"${{ secrets.NEXT_PUBLIC_API_URL }}\"
