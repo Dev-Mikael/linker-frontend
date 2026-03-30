@@ -187,6 +187,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Reconstruct image URI directly — same formula as build-and-push job
+      - name: "🏷️ Set Image URI"
+        id: image
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_URI="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:sha-${SHORT_SHA}"
+          echo "uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "Image to deploy: ${IMAGE_URI}"
+
+          # Verify image exists in ECR before trying to deploy it
+          aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --image-ids imageTag=sha-${SHORT_SHA} \
+            --region ${{ env.AWS_REGION }} > /dev/null
+          echo "✅ Image confirmed in ECR"
+
       - name: "🔎 Check if App Runner Service Exists"
         id: check-service
         run: |
@@ -197,18 +213,21 @@ jobs:
 
           if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
             echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Service does not exist — will CREATE"
           else
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "service-arn=${SERVICE_ARN}" >> $GITHUB_OUTPUT
+            echo "Service exists: ${SERVICE_ARN}"
           fi
 
-      # First deploy: create the service
       - name: "🆕 Create App Runner Service (First Deploy)"
         if: steps.check-service.outputs.exists == 'false'
         run: |
-          IMAGE_URI="${{ needs.build-and-push.outputs.image-uri }}"
+          IMAGE_URI="${{ steps.image.outputs.uri }}"
           ACCOUNT_ID="${{ secrets.AWS_ACCOUNT_ID }}"
           REGION="${{ env.AWS_REGION }}"
+
+          echo "Creating App Runner service with image: ${IMAGE_URI}"
 
           aws apprunner create-service \
             --region "${REGION}" \
@@ -237,7 +256,8 @@ jobs:
             }" \
             --instance-configuration "{
               \"Cpu\": \"1 vCPU\",
-              \"Memory\": \"2 GB\"
+              \"Memory\": \"2 GB\",
+              \"InstanceRoleArn\": \"arn:aws:iam::${ACCOUNT_ID}:role/AppRunnerLinkerInstanceRole\"
             }" \
             --health-check-configuration "{
               \"Protocol\": \"HTTP\",
@@ -250,13 +270,27 @@ jobs:
 
           echo "✅ Frontend App Runner service created"
 
-      # Subsequent deploys: update the existing service
       - name: "🔄 Update App Runner Service (Subsequent Deploys)"
         if: steps.check-service.outputs.exists == 'true'
         run: |
-          IMAGE_URI="${{ needs.build-and-push.outputs.image-uri }}"
+          IMAGE_URI="${{ steps.image.outputs.uri }}"
           SERVICE_ARN="${{ steps.check-service.outputs.service-arn }}"
 
+          echo "Waiting for service to be ready..."
+          for i in {1..20}; do
+            STATUS=$(aws apprunner describe-service \
+              --service-arn "${SERVICE_ARN}" \
+              --region ${{ env.AWS_REGION }} \
+              --query "Service.Status" \
+              --output text)
+            echo "Status: ${STATUS}"
+            if [ "${STATUS}" = "RUNNING" ]; then
+              break
+            fi
+            sleep 30
+          done
+
+          echo "Updating service with image: ${IMAGE_URI}"
           aws apprunner update-service \
             --region ${{ env.AWS_REGION }} \
             --service-arn "${SERVICE_ARN}" \
@@ -269,8 +303,7 @@ jobs:
                 }
               }
             }"
-
-          echo "✅ Frontend service update triggered"
+          echo "✅ Service update triggered"
 
       - name: "📋 Print Service URL"
         run: |
